@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+/* Global base overrides */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  background-color: #f9fafb;
+  color: #111827;
+}
+
+/* Smooth transitions on interactive elements */
+button, a {
+  transition: all 0.15s ease;
+}
