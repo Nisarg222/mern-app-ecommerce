@@ -1,5 +1,5 @@
 const authService = require("../services/auth");
-const User = require("../models/User");
+const { User, UserAddress } = require("../models");
 const ApiResponse = require("../utils/ApiResponse");
 const ApiError = require("../utils/ApiError");
 
@@ -7,7 +7,7 @@ const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
   sameSite: "strict",
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
 // POST /api/auth/register
@@ -43,7 +43,7 @@ exports.login = async (req, res, next) => {
 };
 
 // POST /api/auth/logout
-exports.logout = async (req, res, next) => {
+exports.logout = async (_req, res, next) => {
   try {
     res.clearCookie("token");
     res
@@ -57,7 +57,10 @@ exports.logout = async (req, res, next) => {
 // GET /api/auth/me
 exports.getMe = async (req, res, next) => {
   try {
-    res.status(200).json(new ApiResponse(200, { user: req.user }));
+    const user = await User.findByPk(req.user.id, {
+      include: [{ model: UserAddress, as: "addresses" }],
+    });
+    res.status(200).json(new ApiResponse(200, { user }));
   } catch (err) {
     next(err);
   }
@@ -67,7 +70,6 @@ exports.getMe = async (req, res, next) => {
 exports.forgotPassword = async (req, res, next) => {
   try {
     const resetToken = await authService.forgotPassword(req.body.email);
-    // In production, send an email containing this URL instead of returning it
     const resetUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/reset-password/${resetToken}`;
     res
       .status(200)
@@ -105,11 +107,8 @@ exports.resetPassword = async (req, res, next) => {
 exports.updateProfile = async (req, res, next) => {
   try {
     const { name, phone, avatar } = req.body;
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { $set: { name, phone, avatar } },
-      { new: true, runValidators: true },
-    );
+    const user = await User.findByPk(req.user.id);
+    await user.update({ name, phone, avatar });
     res.status(200).json(new ApiResponse(200, { user }, "Profile updated."));
   } catch (err) {
     next(err);
@@ -119,21 +118,17 @@ exports.updateProfile = async (req, res, next) => {
 // POST /api/auth/addresses
 exports.addAddress = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user._id);
-
     if (req.body.isDefault) {
-      user.addresses.forEach((a) => {
-        a.isDefault = false;
-      });
-    }
-
-    user.addresses.push(req.body);
-    await user.save();
-    res
-      .status(201)
-      .json(
-        new ApiResponse(201, { addresses: user.addresses }, "Address added."),
+      await UserAddress.update(
+        { isDefault: false },
+        { where: { userId: req.user.id } },
       );
+    }
+    await UserAddress.create({ ...req.body, userId: req.user.id });
+    const addresses = await UserAddress.findAll({
+      where: { userId: req.user.id },
+    });
+    res.status(201).json(new ApiResponse(201, { addresses }, "Address added."));
   } catch (err) {
     next(err);
   }
@@ -142,21 +137,16 @@ exports.addAddress = async (req, res, next) => {
 // DELETE /api/auth/addresses/:id
 exports.deleteAddress = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user._id);
-    const before = user.addresses.length;
-    user.addresses = user.addresses.filter(
-      (a) => a._id.toString() !== req.params.id,
-    );
-
-    if (user.addresses.length === before)
-      throw new ApiError(404, "Address not found.");
-
-    await user.save();
+    const deleted = await UserAddress.destroy({
+      where: { id: req.params.id, userId: req.user.id },
+    });
+    if (!deleted) throw new ApiError(404, "Address not found.");
+    const addresses = await UserAddress.findAll({
+      where: { userId: req.user.id },
+    });
     res
       .status(200)
-      .json(
-        new ApiResponse(200, { addresses: user.addresses }, "Address removed."),
-      );
+      .json(new ApiResponse(200, { addresses }, "Address removed."));
   } catch (err) {
     next(err);
   }
